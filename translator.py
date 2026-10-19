@@ -6,6 +6,7 @@ translate_backend:
 - cloud  ：只用云端 OpenAI 兼容接口
 - offline：只用内置离线模型（无需联网、无需本地 AI）
 """
+import os
 import re
 import subprocess
 import time
@@ -73,6 +74,10 @@ def _run_lms(cfg, args, timeout=180):
 def _ensure_server(cfg):
     if _server_up(cfg):
         return
+    lms = cfg.get("lms_exe")
+    # 没装 LM Studio 时立刻失败，别傻等 15 秒（那 15 秒会拖慢回退到云端/离线）
+    if not lms or not os.path.exists(lms):
+        raise RuntimeError("未找到 LM Studio（%s），本地翻译不可用" % (lms or "lms_exe 未配置"))
     try:
         _run_lms(cfg, ["server", "start"], timeout=40)
     except Exception:
@@ -81,7 +86,7 @@ def _ensure_server(cfg):
         time.sleep(0.5)
         if _server_up(cfg):
             return
-    raise RuntimeError("LM Studio 服务未启动（127.0.0.1:1234）")
+    raise RuntimeError("LM Studio 服务未启动（%s）" % cfg.get("lmstudio_url"))
 
 
 def _payload(model, text, system):
@@ -124,19 +129,39 @@ def _local_translate(cfg, text, system):
 
 
 # ---------------- 云端（OpenAI 兼容） ----------------
+def _cloud_config(cfg):
+    """返回 (base_url, api_key, model, 是否复用了解题配置)。
+
+    翻译有自己的云端配置，但用户往往只在「解题」里填了一次 Key。
+    翻译这边没配全时，复用解题的云端配置——否则会白白掉到离线小模型（质量差很多）。
+    """
+    url = (cfg.get("cloud_base_url") or "").strip()
+    key = (cfg.get("cloud_api_key") or "").strip()
+    model = (cfg.get("cloud_model") or "").strip()
+    if key and model:
+        return url, key, model, False
+    s_key = (cfg.get("solve_cloud_key") or "").strip()
+    s_model = (cfg.get("solve_cloud_model") or "").strip()
+    if s_key and s_model:
+        return (cfg.get("solve_cloud_url") or url).strip(), s_key, s_model, True
+    return url, key, model, False
+
+
 def _cloud_ready(cfg):
-    return bool(cfg.get("cloud_base_url") and cfg.get("cloud_api_key") and cfg.get("cloud_model"))
+    url, key, model, _ = _cloud_config(cfg)
+    return bool(url and key and model)
 
 
 def _cloud_translate(cfg, text, system):
-    url = cfg["cloud_base_url"].rstrip("/") + "/chat/completions"
+    base, key, model, _ = _cloud_config(cfg)
+    url = base.rstrip("/") + "/chat/completions"
     headers = {
         "Content-Type": "application/json",
-        "Authorization": "Bearer " + cfg["cloud_api_key"],
+        "Authorization": "Bearer " + key,
     }
     # 云端用默认 session（允许走系统代理，跨境服务常需要）
     r = requests.post(url, headers=headers,
-                      json=_payload(cfg["cloud_model"], text, system), timeout=120)
+                      json=_payload(model, text, system), timeout=120)
     if r.status_code != 200:
         raise RuntimeError("HTTP %s：%s" % (r.status_code, r.text[:160]))
     return r.json()["choices"][0]["message"]["content"].strip()
@@ -162,8 +187,17 @@ def local_status():
         return False, "%s: %s" % (type(exc).__name__, str(exc)[:80])
 
 
+_last_backend = None   # 上一次翻译实际用了哪条路：local / cloud / offline
+
+
+def last_backend():
+    """供界面显示「这次翻译是用什么翻的」，方便用户判断质量。"""
+    return _last_backend
+
+
 def translate(text):
     """按配置的优先级翻译文本：本地 → 云端 → 内置离线。"""
+    global _last_backend
     if not text or not text.strip():
         return ""
     cfg = config.get_all()
@@ -178,7 +212,9 @@ def translate(text):
     # ① 本地 LM Studio
     if backend in ("auto", "local"):
         try:
-            return _local_translate(cfg, text, system)
+            out = _local_translate(cfg, text, system)
+            _last_backend = "local"
+            return out
         except Exception as exc:
             errors.append("本地 LM Studio：%s" % exc)
             if backend == "local":
@@ -188,7 +224,9 @@ def translate(text):
     if backend in ("auto", "cloud"):
         if _cloud_ready(cfg):
             try:
-                return _cloud_translate(cfg, text, system)
+                out = _cloud_translate(cfg, text, system)
+                _last_backend = "cloud"
+                return out
             except Exception as exc:
                 errors.append("云端 API：%s" % exc)
                 if backend == "cloud":
@@ -200,7 +238,9 @@ def translate(text):
     if backend in ("auto", "offline"):
         if offline_translate.is_available():
             try:
-                return offline_translate.translate(text, direction)
+                out = offline_translate.translate(text, direction)
+                _last_backend = "offline"
+                return out
             except Exception as exc:
                 errors.append("内置离线模型：%s" % exc)
                 if backend == "offline":

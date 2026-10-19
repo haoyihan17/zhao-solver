@@ -523,7 +523,9 @@ class FloatingWindow(QWidget):
 
     def _on_trans_done(self, text):
         self.trans_text.setPlainText(text or "")
-        self.lbl_status.setText("翻译完成")
+        tag = {"local": "本地 AI", "cloud": "云端",
+               "offline": "离线模型·质量一般"}.get(translator.last_backend(), "")
+        self.lbl_status.setText("翻译完成" + ("（%s）" % tag if tag else ""))
         self.btn_translate.setText(self._action_label())
         self.btn_translate.setEnabled(True)
 
