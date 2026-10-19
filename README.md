@@ -122,9 +122,21 @@ OCR 天生读不懂二维结构（行列式、矩阵、多重分式），转成�
 
 ## 运行
 
-双击 `run.bat`（走 `D:\zhaocamera_build\.buildenv` 这个纯英文路径的 Python 环境）。
+双击 `run.bat`。它会依次尝试：项目内 `.venv` → 环境变量 `ZHAO_PYTHON` → 构建目录里的 venv → 系统 `pythonw`。
 
-**前置条件**：LM Studio 已安装并下载了这两个模型；服务端口 1234 可访问。
+> ⚠️ **路径要求**：pip 版 PyQt5 在**中文路径**下解析不到 Qt 插件，Python 环境要装在纯英文路径下
+> （`build_exe.bat` 会自动建到脚本所在盘根目录，如 `D:\zhaocamera_solve_build`）。
+
+或者直接下载 [Releases](../../releases) 里的安装包，免装 Python。
+
+**前置条件（按模式不同）**
+
+| 模式 | 需要什么 |
+| --- | --- |
+| 普通解题 | 装 [LM Studio](https://lmstudio.ai/)，下载 `qwen3-vl-8b-instruct`，启动本地服务（端口 1234） |
+| 困难模式 | 一个能看图的云端模型 Key（默认配好智谱 `glm-4.6v`） |
+| 翻译 | 以上任一即可；都没有也能用内置离线模型 |
+
 程序会在需要时自动 `lms load` 对应模型。
 
 ---
