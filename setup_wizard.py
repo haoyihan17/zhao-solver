@@ -61,7 +61,9 @@ class SetupWizard(QDialog):
         form.addRow("云端模型名", self.edit_cloud_model)
         layout.addLayout(form)
 
-        hint = QLabel("提示：云端 Key 只保存在你自己电脑的 config.json 里，不会外传。")
+        hint = QLabel(
+            "提示：云端 Key 只保存在你自己电脑的 config.json 里，不会外传。\n"
+            "填一次会同时用于「解题」和「翻译」。困难模式需要能看图的模型（默认 glm-4.6v，可在设置里改）。")
         hint.setWordWrap(True)
         hint.setStyleSheet("color: #888; font-size: 11px;")
         layout.addWidget(hint)
@@ -106,9 +108,19 @@ class SetupWizard(QDialog):
     def _save(self):
         cfg = config.get_all()
         cfg["translate_backend"] = self.cmb_backend.currentData()
-        cfg["cloud_base_url"] = self.edit_cloud_url.text().strip()
-        cfg["cloud_api_key"] = self.edit_cloud_key.text().strip()
-        cfg["cloud_model"] = self.edit_cloud_model.text().strip()
+        url = self.edit_cloud_url.text().strip()
+        key = self.edit_cloud_key.text().strip()
+        model = self.edit_cloud_model.text().strip()
+        cfg["cloud_base_url"] = url
+        cfg["cloud_api_key"] = key
+        cfg["cloud_model"] = model
+        # 同一把 Key 也给解题用：否则用户在这儿填完，点「解题」还会报「未配置云端 Key」
+        if key:
+            cfg["solve_cloud_url"] = url
+            cfg["solve_cloud_key"] = key
+            cfg["solve_cloud_model"] = model
+            if not (cfg.get("solve_cloud_vision_model") or "").strip():
+                cfg["solve_cloud_vision_model"] = "glm-4.6v"
         cfg["first_run_done"] = True
         config.save(cfg)
         self.accept()
